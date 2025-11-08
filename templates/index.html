@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skin Cancer Detection - Demo</title>
+    <style>
+      :root{ --accent:#2b6cb0; --muted:#6b7280; --bg:#f7fafc; }
+      body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:#111827; margin:0; padding:24px;}
+      .container{max-width:920px;margin:24px auto;background:#fff;border-radius:8px;padding:24px;box-shadow:0 6px 20px rgba(15,23,42,0.06);} 
+      header{display:flex;align-items:center;gap:16px}
+      h1{margin:0;font-size:20px}
+      p.lead{margin:6px 0 18px;color:var(--muted)}
+      .grid{display:grid;grid-template-columns:320px 1fr;gap:20px}
+      .card{background:#fff;border:1px solid #e6eef8;padding:16px;border-radius:8px}
+      .preview{width:100%;height:auto;border-radius:6px;display:block;object-fit:cover;}
+      .file-input{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:12px}
+      input[type=file]{padding:6px;flex:1;min-width:0}
+      button{background:var(--accent);color:#fff;border:0;padding:8px 16px;border-radius:6px;cursor:pointer;white-space:nowrap}
+      button.secondary{background:#94a3b8}
+      .progress{height:12px;background:#eef2ff;border-radius:999px;overflow:hidden}
+      .progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#4c51bf);width:0%}
+      table{width:100%;border-collapse:collapse;margin-top:8px}
+      td{padding:6px 4px;vertical-align:middle}
+      .pred-class{font-weight:700;font-size:18px}
+      .muted{color:var(--muted)}
+      .actions{display:flex;gap:8px;margin-top:12px}
+      .json-view{background:#0f172a;color:#e6eef8;padding:12px;border-radius:6px;overflow:auto;max-height:240px;font-family:monospace;font-size:13px}
+      @media (max-width:780px){.grid{grid-template-columns:1fr}.container{padding:16px}}
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1>Skin Cancer Detection</h1>
+          <p class="lead">Upload an image and the model will return class probabilities.</p>
+        </div>
+      </header>
+
+      <div class="grid">
+        <div class="card">
+          <form id="upload-form" enctype="multipart/form-data">
+            <div class="file-input">
+              <input type="file" id="image" name="image" accept="image/*" required />
+              <button id="predict-btn" type="submit">Predict</button>
+            </div>
+            <div style="margin-top:12px">
+              <small class="muted">Tip: crop the lesion to center it for better results.</small>
+            </div>
+          </form>
+
+          <div style="margin-top:18px">
+            <div class="muted">Preview</div>
+            <img id="preview" class="preview" src="" alt="image preview" />
+          </div>
+        </div>
+
+        <div>
+          <div class="card" id="result-card">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div class="muted">Prediction</div>
+                <div id="predicted" class="pred-class">No prediction yet</div>
+              </div>
+              <div id="spinner" style="display:none">⏳ Predicting...</div>
+            </div>
+
+            <div id="prob-list" style="margin-top:12px"></div>
+
+            <div class="actions">
+              <button id="download-json" class="secondary" style="display:none">Download JSON</button>
+              <button id="copy-json" class="secondary" style="display:none">Copy JSON</button>
+              <div style="flex:1"></div>
+              <div id="meta" class="muted"></div>
+            </div>
+
+            <div style="margin-top:12px">
+              <div class="muted">Raw JSON</div>
+              <pre id="json-raw" class="json-view">{ "status": "empty" }</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById('upload-form');
+      const imageInput = document.getElementById('image');
+      const preview = document.getElementById('preview');
+      const predictedEl = document.getElementById('predicted');
+      const probList = document.getElementById('prob-list');
+      const spinner = document.getElementById('spinner');
+      const jsonRaw = document.getElementById('json-raw');
+      const downloadBtn = document.getElementById('download-json');
+      const copyBtn = document.getElementById('copy-json');
+      const meta = document.getElementById('meta');
+
+      let lastJson = null;
+
+      imageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        preview.src = url;
+      });
+
+      function setLoading(on){
+        spinner.style.display = on ? 'block' : 'none';
+        document.getElementById('predict-btn').disabled = on;
+      }
+
+      function renderResult(data){
+        lastJson = data;
+        jsonRaw.textContent = JSON.stringify(data, null, 2);
+        downloadBtn.style.display = 'inline-block';
+        copyBtn.style.display = 'inline-block';
+        meta.textContent = new Date().toLocaleString();
+
+        // predicted class
+        if (data.predicted_class) {
+          predictedEl.textContent = data.predicted_class;
+        } else {
+          predictedEl.textContent = 'Unknown';
+        }
+
+        // predictions mapping
+        const preds = data.predictions || {};
+        // Clear
+        probList.innerHTML = '';
+        // sort by probability desc
+        const items = Object.entries(preds).sort((a,b)=>b[1]-a[1]);
+        if (items.length === 0 && Array.isArray(data.raw)){
+          // fallback: show raw array
+          const r = data.raw.map((v,i)=>[String(i), v]);
+          r.forEach(([k,v])=>appendProb(k, v));
+        } else {
+          items.forEach(([k,v])=>appendProb(k, v));
+        }
+      }
+
+      function appendProb(label, prob){
+        const row = document.createElement('div');
+        row.style.marginBottom = '10px';
+        const name = document.createElement('div');
+        name.textContent = label + ' — ' + (Math.round(prob*10000)/100) + '%';
+        name.style.marginBottom = '6px';
+        const prog = document.createElement('div');
+        prog.className = 'progress';
+        const inner = document.createElement('i');
+        inner.style.width = Math.max(2, Math.round(prob*100)) + '%';
+        prog.appendChild(inner);
+        row.appendChild(name);
+        row.appendChild(prog);
+        probList.appendChild(row);
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (imageInput.files.length === 0) { alert('Choose an image file first'); return; }
+        const f = new FormData();
+        f.append('image', imageInput.files[0]);
+
+        setLoading(true);
+        jsonRaw.textContent = '{ "status": "predicting" }';
+        try {
+          const resp = await fetch('/predict', { method: 'POST', body: f });
+          const data = await resp.json();
+          if (!resp.ok) {
+            jsonRaw.textContent = JSON.stringify({ error: data }, null, 2);
+            predictedEl.textContent = 'Error';
+            probList.innerHTML = '';
+          } else {
+            renderResult(data);
+          }
+        } catch (err) {
+          jsonRaw.textContent = JSON.stringify({ error: String(err) }, null, 2);
+          predictedEl.textContent = 'Request failed';
+        } finally {
+          setLoading(false);
+        }
+      });
+
+      downloadBtn.addEventListener('click', ()=>{
+        if (!lastJson) return;
+        const blob = new Blob([JSON.stringify(lastJson, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'prediction.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+
+      copyBtn.addEventListener('click', async ()=>{
+        if (!lastJson) return;
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(lastJson, null, 2));
+          copyBtn.textContent = 'Copied';
+          setTimeout(()=>copyBtn.textContent = 'Copy JSON', 1500);
+        } catch (e){
+          alert('Copy failed: ' + e);
+        }
+      });
+    </script>
+  </body>
+</html>
