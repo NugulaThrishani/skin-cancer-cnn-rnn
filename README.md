@@ -1,4 +1,4 @@
-# Skin Cancer Model Flask Demo
+# Skin Cancer Model Flask 
 
 This repository provides a minimal Flask server to serve a trained Keras model (a `.keras` model file) for skin cancer detection. It includes a demo HTML page for manual testing and a small test script for programmatic calls.
 
@@ -47,3 +47,4 @@ Environment variables
 Notes
 - TensorFlow can be large; ensure you have an appropriate Python version and GPU drivers if using GPU builds.
 - If your model uses custom layers, you may need to provide `custom_objects` to `load_model`. The `load_model_safe` helper in `app.py` can be extended for that.
+
